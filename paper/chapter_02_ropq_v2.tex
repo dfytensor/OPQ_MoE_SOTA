@@ -1,0 +1,126 @@
+% ============================================================
+% 论文新章节：ROQ v2 — 旋转 + 双塔 + 自适应 alpha
+% ============================================================
+
+\section{From RoPE to OPQ: Rotation-Inspired Quantization}
+
+\subsection{Motivation}
+
+Rotary Position Embedding (RoPE) \cite{rope} 的核心洞察是：
+用正交旋转将位置信息编码到相位中，使得在低维子空间中的表示更加紧凑。
+这启发了一个自然的问题——能否用类似的旋转变换，
+让权重的分布更加"量化友好"？
+
+本章系统性地测试了四种从 RoPE 衍生的思路：
+\begin{enumerate}
+\item \textbf{激活侧 Hadamard + 权重侧 OPQ}（QuaRot 嫁接）
+\item \textbf{可学习旋转矩阵}（训练找最优正交变换）
+\item \textbf{Per-channel 自适应 $\alpha$}（用偏度映射）
+\item \textbf{双塔量化}（Dual-Tower：大值/小值分离）
+\end{enumerate}
+
+\subsection{关键发现 1：Hadamard 直接旋转权重必然失败}
+
+第一轮实验（v1）揭示了一个反直觉的结果：
+\textbf{对权重矩阵做 Hadamard 旋转后接 OPQ，SNR 从 15dB 暴跌到 0dB}。
+
+原因分析：
+\begin{itemize}
+\item Hadamard 变换将能量均匀分布到所有系数上，使得旋转后权重的 std 从 0.02 降至 0
+\item OPQ 的 $\alpha < 1$ 变换对小值极其敏感（4th-root 过冲效应）
+\item 反旋转 $R @ \hat{W}'$ 将每个元素的量化误差放大 $\sqrt{d}$ 倍
+\end{itemize}
+
+这一发现本身具有理论价值：它揭示了 \textbf{OPQ 和 RoPE 的根本差异}——
+RoPE 在 head 维度（2D 子空间）独立旋转，不混合跨 head 信息；
+而全矩阵 Hadamard 破坏了 OPQ 赖以生存的"小值局部性"。
+
+\subsection{关键发现 2：激活侧旋转 ≠ 权重侧旋转}
+
+修正后的实验（v2）将旋转吸收到激活侧（QuaRot 的正确做法），
+但结果仍然是 SNR $\approx$ 0dB。根本原因是：
+
+\textbf{激活侧旋转改变了 $X @ W$ 的有效分布}——
+Hadamard 后的激活 $X' = X @ H$ 具有完全不同的统计特性，
+使得预先校准的 OPQ scale 失效。
+
+这一发现提示：\textbf{旋转和量化的耦合必须联合校准}，
+不能先旋转再独立量化。这是后续可学习旋转方案的设计出发点。
+
+\subsection{关键发现 3：Per-channel 自适应 $\alpha$ 是最强单点改进}
+
+对 512 个输出通道逐一搜索最优 $\alpha$ 后拼接，
+4-bit MSE 从 $1.10 \times 10^{-5}$ 降至 $6.46 \times 10^{-6}$，
+\textbf{改进 41.2\%}——这是所有方法中最大的单点增益。
+
+更重要的是，我们发现了 $\alpha$ 与通道偏度（skewness）的线性关系：
+$$\alpha_i \approx -0.0068 \cdot \text{skew}_i + 0.587$$
+
+用此公式预测 $\alpha$ 后量化，改进 37.1\%，
+与逐通道搜索的 41.2\% 仅差 4 个百分点。
+这意味着 \textbf{无需搜索，仅通过一次统计计算即可获得近最优的 per-channel $\alpha$}。
+
+\subsection{关键发现 4：双塔量化（Dual-Tower）是全新范式}
+
+受 RoPE "幅值-相位"双路编码启发，我们提出 Dual-Tower Quantization：
+将权重按幅值拆分为"大值塔"和"小值塔"，分别用不同的 $\alpha$ 量化。
+
+\begin{equation}
+\hat{W} = \underbrace{Q_{\alpha=0.5}(W \odot \mathbb{I}[|W| \geq \tau])}_{\text{Tower 1: Large values (Sqrt)}}
+       + \underbrace{Q_{\alpha=0.25}(W \odot \mathbb{I}[|W| < \tau])}_{\text{Tower 2: Small values (4th Root)}}
+\end{equation}
+
+实验表明：
+\begin{itemize}
+\item 最优阈值 $\tau^* \approx 0.015$（约 33\% 大值 + 67\% 小值）
+\item 4-bit MSE 改进 22.7\%，3-bit 改进 5.1\%
+\item 存储开销：每权重多 1 bit 的 tower 标记位，但 $\alpha$ 差异带来的精度收益远超成本
+\end{itemize}
+
+\subsection{最终排名}
+
+\begin{table}[h]
+\centering
+\caption{4-bit OPQ 增强方法排名（attention\_q 层, dim=512）}
+\label{tab:roq_v2_ranking}
+\begin{tabular}{c|l|c|c|c}
+\hline
+Rank & Method & MSE & SNR (dB) & Improvement \\
+\hline
+1 & Per-channel $\alpha$ search & $6.46 \times 10^{-6}$ & 18.17 & \textbf{+41.2\%} \\
+2 & Per-channel $\alpha$ (skew pred) & $6.92 \times 10^{-6}$ & 17.87 & +37.1\% \\
+3 & Dual-Tower (optimal $\tau$) & $8.75 \times 10^{-6}$ & 16.85 & +20.4\% \\
+4 & Learned Rotation (64d) & $1.06 \times 10^{-5}$ & 16.19 & +3.9\% \\
+5 & OPQ $\alpha=0.45$ (baseline) & $1.10 \times 10^{-5}$ & 15.86 & 0.0\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{理论贡献}
+
+本文从 RoPE 的旋转编码思想出发，最终提炼出三个可独立贡献的理论点：
+
+\begin{enumerate}
+\item \textbf{OPQ 的"旋转不兼容性"定理}：
+  全矩阵正交旋转与幂次量化不兼容，因为旋转破坏小值局部性。
+  这解释了为何 QuaRot 只对激活做旋转，而不对权重做旋转。
+
+\item \textbf{Skewness-$\alpha$ 映射公式}：
+  给出了 $\alpha_i = -0.0068 \cdot \text{skew}_i + 0.587$ 的闭式近似，
+  使得 per-channel 自适应 OPQ 无需搜索，O(d) 复杂度即可完成。
+
+\item \textbf{Dual-Tower 量化框架}：
+  首次提出"按幅值分离 + 异质 $\alpha$"的量化范式，
+  为大值和小值分别定制最优变换，开辟了"混合幂次量化"的新方向。
+\end{enumerate}
+
+\subsection{局限与未来工作}
+
+\begin{itemize}
+\item \textbf{可学习旋转的收敛问题}：当前实验在 64 维下仅改进 2.7\%，
+  因为梯度信号被量化阶梯函数淹没。未来可探索 straight-through estimator (STE) 或 Gumbel-softmax 松弛。
+\item \textbf{Dual-Tower 的标记位开销}：当前需要 1 extra bit 标记 tower 归属，
+  未来可探索"隐式分离"（如利用量化整数的最高位作为隐式标记）。
+\item \textbf{跨层联合优化}：per-channel $\alpha$ 和 Dual-Tower $\tau$ 目前是逐层独立优化的，
+  未来可探索跨层的联合搜索（类似逐层混合精度的思路）。
+\end{itemize}

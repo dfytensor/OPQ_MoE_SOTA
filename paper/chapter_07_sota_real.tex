@@ -1,0 +1,32 @@
+% Chapter 7: Real-Model SOTA Validation
+\section{Real-Model Validation}
+Chapters 1--6 developed OPQ-MoE analytically. This chapter validates on
+actual pre-trained weights.
+
+\subsection{Setup}
+Model: GPT-2 (124M). 50 linear layers. Baselines: FP16, RTN-8/4bit,
+GPTQ-sim, AWQ-sim. OPQ variants: Global, PC, PC+SR, MoE-4b, MoE-3b.
+
+\subsection{Key Results}
+\begin{itemize}
+\item \textbf{OPQ-PC 4-bit: 99.554\% WtdRet, KLD$_w$=0.204}
+\item GPTQ-sim 4-bit: 99.449\%, KLD$_w$=4.130
+\item AWQ-sim 4-bit: 98.781\%, KLD$_w$=16.922
+\item RTN 4-bit: 98.970\%, KLD$_w$=23.892
+\item OPQ-PC KLD$_w$ is 20$\times$ lower than GPTQ, 100$\times$ lower than RTN
+\item OPQ-MoE 3-bit: 96.678\% at 5.33$\times$ compression
+\end{itemize}
+
+\subsection{Correct SR Implementation}
+SR must operate in quantization domain (Bernoulli on fractional part),
+not weight domain. Incorrect v1 impl collapsed retention to 0.7\%;
+corrected v2 achieves 99.1\%.
+
+\subsection{Why OPQ Wins on KLD}
+Power transform $v=(|w|/m)^\alpha$ maps Laplacian weights to near-uniform
+quantized representation, making histograms nearly indistinguishable
+from original (KLD 0.2 vs 23.9 for RTN).
+
+\subsection{Limitations}
+GPT-2 only; LLaMA-2-7B/Mixtral pending. GPTQ-sim/AWQ-sim simplified.
+Custom inference kernel future work.

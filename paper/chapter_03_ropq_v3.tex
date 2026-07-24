@@ -1,0 +1,146 @@
+% ============================================================
+% ROQ v3 论文章节：终极组合
+% ============================================================
+
+\section{ROQ v3: Composite Quantization Framework}
+
+\subsection{Overview}
+
+本章将前几章的发现组合为统一的量化框架，
+验证 ``4-bit ROQ v3 $\approx$ FP16'' 的核心假设。
+最终方案 \textbf{DT+PC (Dual-Tower + Per-Channel)} 在 attention\_q 层上
+将 4-bit 量化 SNR 从 15.15 dB 提升至 \textbf{20.61 dB}（+71.6\%），
+端到端 SNR 从 8.30 dB 提升至 \textbf{13.79 dB}（+66\%）。
+
+\subsection{Composite Framework}
+
+完整的 ROQ v3 流水线如下：
+
+\begin{enumerate}
+\item \textbf{旋转预变换}（可选，当前实验未启用以避免梯度问题）：
+  对权重 $W$ 左乘块对角正交矩阵 $R$，
+  将通道间相关性降到最低。
+\item \textbf{双塔分离}：按幅值阈值 $\tau$ 拆分为大值塔和小值塔。
+\item \textbf{Per-channel 幂次适配}：每个通道独立搜索最优 $\alpha$。
+\item \textbf{混合精度分配}：按敏感度给每层分配不同 bit 宽度。
+\end{enumerate}
+
+\subsection{Core Results}
+
+\subsubsection{Weight-level MSE (attn\_q, 4-bit)}
+
+\begin{table}[h]
+\centering
+\caption{4-bit 方法排名（attention\_q 层, dim=512）}
+\begin{tabular}{c|l|c|c|c}
+\hline
+Rank & Method & MSE & SNR (dB) & Gain \\
+\hline
+\textbf{1} & \textbf{DT+Per-ch $\tau^*$=0.030} & \textbf{3.46e-6} & \textbf{20.61} & \textbf{+71.6\%} \\
+2 & Per-channel $\alpha$ search & 6.21e-6 & 18.08 & +49.1\% \\
+3 & Dual-Tower (global $\alpha$) & 1.12e-5 & 15.52 & +8.3\% \\
+4 & Global OPQ $\alpha$=0.50 & 1.15e-5 & 15.39 & +5.5\% \\
+5 & Global OPQ $\alpha$=0.45 (baseline) & 1.22e-5 & 15.15 & 0.0\% \\
+6 & Global 3-bit $\alpha$=0.40 & 7.55e-5 & 7.22 & -520\% \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{End-to-End SNR (full Transformer block)}
+
+\begin{table}[h]
+\centering
+\caption{端到端推理 SNR（4 层 Transformer block, dim=512）}
+\begin{tabular}{c|l|c}
+\hline
+Rank & Method & E2E SNR (dB) \\
+\hline
+\textbf{1} & \textbf{DT+Per-ch 4-bit} & \textbf{13.79} \\
+2 & Per-channel $\alpha$ 4-bit & 11.43 \\
+3 & Global 4-bit OPQ & 8.30 \\
+4 & Global 3-bit & -2.20 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Per-layer Breakdown}
+
+\begin{table}[h]
+\centering
+\caption{各层最佳方法（4-bit）}
+\begin{tabular}{c|l|c|c}
+\hline
+Layer & Best Method & Best SNR & 2nd Best \\
+\hline
+attn\_q & DT+PC & 20.6 dB & Per-ch (18.1) \\
+attn\_v & DT+PC & 20.6 dB & Per-ch (17.5) \\
+ffn\_gate & DT+PC & 18.7 dB & Per-ch (16.2) \\
+ffn\_up & DT+PC & 20.3 dB & Per-ch (17.8) \\
+\hline
+\end{tabular}
+\end{table}
+
+关键观察：\textbf{DT+PC 在所有层上都是最优方法}，且优势一致（+50\% 到 +74\%）。
+
+\subsubsection{Large-Scale Validation (1024$\times$1024)}
+
+\begin{table}[h]
+\centering
+\caption{大规模验证（1024$\times$1024 权重矩阵）}
+\begin{tabular}{c|l|c|c}
+\hline
+Layer & Method & SNR (dB) & Gain \\
+\hline
+attn\_q & Global 4-bit & 15.3 & 0\% \\
+ & Per-channel & 17.7 & +44\% \\
+ & DT+Per-ch & \textbf{20.3} & \textbf{+69\%} \\
+\hline
+ffn\_gate & Global 4-bit & 12.7 & 0\% \\
+ & Per-channel & 16.2 & +54\% \\
+ & DT+PC & \textbf{18.2} & \textbf{+72\%} \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Theoretical Analysis}
+
+\subsubsection{Why DT+PC Works}
+
+双塔分离的本质是 \textbf{对不同幅值分布使用不同的幂次变换}：
+\begin{itemize}
+\item 大值（$\geq \tau$）：分布较平坦，适合 $\alpha \approx 0.50$（Sqrt），
+  因为大值的相对误差对 SNR 贡献大，Sqrt 在大值区近似线性，保精度好。
+\item 小值（$< \tau$）：分布尖锐且集中在零附近，适合 $\alpha \approx 0.25 \sim 0.40$（高次根），
+  拉伸小值区的动态范围，和 OPQ 的核心思想一致。
+\end{itemize}
+
+Per-channel $\alpha$ 搜索进一步优化：每个通道的分布偏度不同，
+最优 $\alpha$ 在 0.30（尖峰通道）到 0.60（平坦通道）之间连续变化。
+
+\subsubsection{Threshold Selection}
+
+实验发现最优阈值 $\tau^* \approx 0.02 \sim 0.03$（对 std$\approx$0.02 的权重），
+对应约 25\%$\sim$35\% 的权重属于"大值塔"。
+这个比例使得两塔的量化误差大致平衡，
+避免某一塔成为瓶颈。
+
+\subsubsection{Storage-Accuracy Pareto}
+
+DT+PC 的存储开销分析：
+\begin{itemize}
+\item 权重量化：4 bit/权重（两塔都用 4-bit）
+\item Tower 标记位：1 bit/权重（标识属于哪个塔）
+\item Per-channel $\alpha$ 存储：每通道 8-bit（128 个通道 $\times$ 8-bit = 128 B，可忽略）
+\item Scale 存储：每通道 16-bit（同样可忽略）
+\end{itemize}
+
+\textbf{有效比特宽度 = 5 bit/权重}（4-bit 量化 + 1-bit 塔标记）。
+相比 FP16 的 16-bit，压缩比 3.2$\times$，
+SNR 从理论最大约 25 dB 降到 20.6 dB（仅损失 4.4 dB）。
+
+\subsection{Reproducibility}
+
+全部实验代码在 \texttt{code/ropq\_v3\_run.py} 中，约 360 行。
+主要依赖：numpy, matplotlib。
+在 CPU 上完整运行约 3 分钟（dim=512, 4 层）。
+图表自动生成在 \texttt{figures/roq\_v3\_master\_figure.png}。

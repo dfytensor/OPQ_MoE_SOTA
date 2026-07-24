@@ -1,0 +1,20 @@
+% Auto-generated SOTA table
+\begin{table}[h]
+\centering
+\caption{SOTA comparison on GPT-2-shaped (synthetic, 125M) (124M params).}\n\label{tab:sota}\begin{tabular}{lcccccc}
+\toprule
+Method & Bits & WtdRet\% & RelErr & KLD$_w$ & KLD$_{out}$ & CompX \\
+\midrule
+FP16 & 16 & 100.00 & 0.0000 & 0.00000 & nan & 1.00 \\
+RTN-8bit & 8 & 100.00 & 0.0058 & 0.68764 & 0.28514 & 2.00 \\
+RTN-4bit & 4 & 98.97 & 0.0979 & 23.89162 & 2.30793 & 4.00 \\
+GPTQsim-4bit & 4 & 99.45 & 0.0685 & 4.13022 & 2.10724 & 4.00 \\
+AWQsim-4bit & 4 & 98.78 & 0.1094 & 16.92162 & 2.39595 & 4.00 \\
+OPQ-Global & 4 & 99.34 & 0.0798 & 22.38980 & 2.18384 & 4.00 \\
+OPQ-PC & 4 & 99.55 & 0.0668 & 0.20413 & 2.07615 & 4.00 \\
+OPQ-PC-SR & 4 & 99.11 & 0.0946 & 0.20432 & 2.26816 & 4.00 \\
+OPQ-MoE-4b & 4 & 99.24 & 0.0871 & 0.56641 & 2.24474 & 4.00 \\
+OPQ-MoE-3b & 3 & 96.68 & 0.1823 & 5.02181 & 2.43828 & 5.33 \\
+\bottomrule
+\end{tabular}
+\end{table}

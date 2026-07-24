@@ -1,0 +1,29 @@
+{
+  "RTN-8bit": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "RTN-4bit": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "GPTQsim-4bit": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "AWQsim-4bit": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "OPQ-Global": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "OPQ-PC": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "OPQ-PC-SR": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "OPQ-MoE-4b": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ],
+  "OPQ-MoE-3b": [
+    "ERROR: index -1 is out of bounds for axis 0 with size 0"
+  ]
+}
